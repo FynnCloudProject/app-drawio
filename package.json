@@ -1,0 +1,15 @@
+{
+  "name": "fynncloud-app-drawio",
+  "version": "1.0.0",
+  "description": "draw.io diagramming and whiteboarding app for FynnCloud",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "setup": "mkdir -p public/editor && curl -fsSL https://github.com/jgraph/drawio/archive/refs/tags/v32.4.1.tar.gz | tar -xz -C public/editor --strip-components=4 drawio-32.4.1/src/main/webapp",
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
