@@ -49,10 +49,69 @@
       opacity: 0;
       display: none;
     }
+    .readonly-bar {
+      position: fixed;
+      top: 12px;
+      right: 16px;
+      z-index: 20;
+      display: none;
+      align-items: center;
+      gap: 8px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    .readonly-bar.visible {
+      display: flex;
+    }
+    .readonly-badge {
+      padding: 6px 10px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 500;
+      background: rgba(241, 245, 249, 0.92);
+      color: #475569;
+      border: 1px solid rgba(15, 23, 42, 0.1);
+      backdrop-filter: blur(8px);
+      user-select: none;
+    }
+    html.dark .readonly-badge {
+      background: rgba(39, 39, 42, 0.92);
+      color: #a1a1aa;
+      border-color: rgba(255, 255, 255, 0.12);
+    }
+    .readonly-close-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      background: rgba(15, 23, 42, 0.88);
+      color: #ffffff;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      backdrop-filter: blur(8px);
+      transition: background 0.15s ease;
+    }
+    .readonly-close-btn:hover {
+      background: rgba(15, 23, 42, 1);
+    }
+    html.dark .readonly-close-btn {
+      background: rgba(244, 244, 245, 0.92);
+      color: #09090b;
+      border-color: rgba(0, 0, 0, 0.12);
+    }
+    html.dark .readonly-close-btn:hover {
+      background: #ffffff;
+    }
   </style>
 </head>
 <body>
   <div id="loading" class="loading-overlay">Loading draw.io...</div>
+  <div id="readonly-bar" class="readonly-bar">
+    <span class="readonly-badge">View only</span>
+    <button id="readonly-close" type="button" class="readonly-close-btn" title="Close (Esc)">Close</button>
+  </div>
   <iframe
     id="drawio-iframe"
     referrerpolicy="no-referrer"
@@ -61,13 +120,37 @@
   ></iframe>
 
   <script>
-    const BLANK_DIAGRAM = `<mxfile host="app.diagrams.net"><diagram id="diagram" name="Page-1"><mxGraphModel dx="1422" dy="794" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0"><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel></diagram></mxfile>`;
+    const BLANK_DIAGRAM = `<mxfile host="app.diagrams.net"><diagram id="diagram" name="Page-1"><mxGraphModel dx="1422" dy="794" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0"><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel></diagram></mxfile>`;
 
     const urlParams = new URLSearchParams(window.location.search);
-    const isDark = urlParams.get('theme') === 'dark';
+    const isDark = urlParams.get('theme') === 'dark' || (urlParams.get('theme') !== 'light' && window.matchMedia?.('(prefers-color-scheme: dark)').matches);
+
+    const DRAWIO_CONFIG = {
+      defaultPageVisible: false,
+      defaultGridEnabled: true,
+      defaultGridSize: 10,
+      defaultEdgeStyle: {
+        edgeStyle: 'orthogonalEdgeStyle',
+        rounded: '1',
+        jettySize: 'auto',
+        orthogonalLoop: '1'
+      },
+      defaultLibraries: 'general;flowchart;uml;arrows',
+      presetColors: [
+        '0F172A', '334155', '64748B', '94A3B8', 'CBD5E1', 'F1F5F9',
+        '1E40AF', '2563EB', '3B82F6', '60A5FA', '93C5FD', 'DBEAFE',
+        '065F46', '059669', '10B981', '34D399', '6EE7B7', 'D1FAE5',
+        '92400E', 'D97706', 'F59E0B', 'FBBF24', 'FDE68A', 'FEF3C7',
+        '991B1B', 'DC2626', 'EF4444', 'F87171', 'FCA5A5', 'FEE2E2',
+        '5B21B6', '7C3AED', '8B5CF6', 'A78BFA', 'C4B5FD', 'EDE9FE'
+      ],
+      enableLightDarkColors: true,
+      suppressNewWindows: true
+    };
 
     let fileId = urlParams.get('fileId') || null;
     let fileName = urlParams.get('fileName') || urlParams.get('name') || 'Diagram.drawio';
+    let isReadOnly = urlParams.get('readOnly') === '1' || urlParams.get('readOnly') === 'true';
     let currentXml = null;
     let drawioReady = false;
     let loading = false;
@@ -80,6 +163,58 @@
 
     const iframe = document.getElementById('drawio-iframe');
     const loadingEl = document.getElementById('loading');
+    const readonlyBarEl = document.getElementById('readonly-bar');
+    const readonlyCloseBtn = document.getElementById('readonly-close');
+
+    readonlyCloseBtn.addEventListener('click', () => {
+      window.fynncloud?.close?.();
+    });
+
+    window.addEventListener('keydown', (e) => {
+      if (isReadOnly && e.key === 'Escape') {
+        window.fynncloud?.close?.();
+      }
+    });
+
+    function buildEditorUrl(readOnlyMode) {
+      const editorUrl = new URL('editor/index.html', window.location.href);
+      editorUrl.searchParams.set('embed', '1');
+      editorUrl.searchParams.set('ui', 'atlas');
+      editorUrl.searchParams.set('spin', '1');
+      editorUrl.searchParams.set('proto', 'json');
+      editorUrl.searchParams.set('configure', '1');
+      editorUrl.searchParams.set('libraries', '1');
+      editorUrl.searchParams.set('noSaveBtn', readOnlyMode ? '1' : '0');
+      editorUrl.searchParams.set('saveAndExit', '0');
+      editorUrl.searchParams.set('noExitBtn', '0');
+      editorUrl.searchParams.set('stealth', '1');
+      editorUrl.searchParams.set('dark', document.documentElement.classList.contains('dark') ? '1' : '0');
+      if (readOnlyMode) {
+        editorUrl.searchParams.set('chrome', '0');
+      }
+      return editorUrl.toString();
+    }
+
+    function applyReadOnlyMode(nextReadOnly) {
+      const normalized = Boolean(nextReadOnly);
+      readonlyBarEl.classList.toggle('visible', normalized);
+      if (normalized !== isReadOnly) {
+        isReadOnly = normalized;
+        drawioReady = false;
+        iframe.src = buildEditorUrl(isReadOnly);
+      }
+    }
+
+    function detectReadOnly(payload) {
+      if (!payload) return isReadOnly;
+      if (typeof payload.readOnly === 'boolean') return payload.readOnly;
+      if (typeof payload.fileAction?.readOnly === 'boolean') return payload.fileAction.readOnly;
+      const f = payload.files?.[0] || payload.fileAction?.files?.[0];
+      if (f?.permissions && typeof f.permissions.canWrite === 'boolean') {
+        return !f.permissions.canWrite;
+      }
+      return isReadOnly;
+    }
 
     function setFile(id, name) {
       if (name) fileName = name;
@@ -148,9 +283,10 @@
       if (!drawioReady || currentXml === null || !iframe.contentWindow) return;
       iframe.contentWindow.postMessage(JSON.stringify({
         action: 'load',
-        autosave: 1,
+        autosave: isReadOnly ? 0 : 1,
         xml: currentXml,
-        title: fileName
+        title: fileName,
+        dark: document.documentElement.classList.contains('dark') ? 1 : 0
       }), '*');
       loadingEl.classList.add('hidden');
     }
@@ -190,6 +326,7 @@
     }
 
     async function save(xml, isAutosave) {
+      if (isReadOnly) return;
       currentXml = xml;
       if (isSaving) {
         queuedXml = xml;
@@ -233,7 +370,7 @@
 
       switch (msg.event) {
         case 'configure':
-          iframe.contentWindow.postMessage(JSON.stringify({ action: 'configure', config: {} }), '*');
+          iframe.contentWindow.postMessage(JSON.stringify({ action: 'configure', config: DRAWIO_CONFIG }), '*');
           break;
         case 'init':
           drawioReady = true;
@@ -241,7 +378,7 @@
           break;
         case 'save':
         case 'autosave':
-          if (msg.xml) save(msg.xml, msg.event === 'autosave');
+          if (!isReadOnly && msg.xml) save(msg.xml, msg.event === 'autosave');
           break;
         case 'exit':
           window.fynncloud?.close?.();
@@ -249,25 +386,42 @@
       }
     });
 
+    function applyTheme(theme) {
+      if (!theme) return;
+      const isDarkMode = theme === 'dark';
+      document.documentElement.classList.toggle('dark', isDarkMode);
+      if (drawioReady && iframe.contentWindow) {
+        iframe.contentWindow.postMessage(JSON.stringify({
+          action: 'invokeAction',
+          actionName: isDarkMode ? 'darkMode' : 'lightMode'
+        }), '*');
+      }
+    }
+
+    readonlyBarEl.classList.toggle('visible', isReadOnly);
+
     if (window.fynncloud) {
       window.fynncloud.init();
 
       window.fynncloud.on('init', (ctx) => {
-        if (ctx.theme) document.documentElement.classList.toggle('dark', ctx.theme === 'dark');
+        if (ctx.theme) applyTheme(ctx.theme);
+        applyReadOnlyMode(detectReadOnly(ctx));
         const target = filesFrom(ctx) || (fileId ? { id: fileId, name: fileName } : null);
         if (target) setFile(target.id, target.name);
       });
 
       window.fynncloud.on('fileAction', (payload) => {
+        applyReadOnlyMode(detectReadOnly(payload));
         const target = filesFrom(payload);
         if (target) setFile(target.id, target.name);
       });
 
       window.fynncloud.on('themeChange', ({ theme }) => {
-        document.documentElement.classList.toggle('dark', theme === 'dark');
+        applyTheme(theme);
       });
 
       window.fynncloud.on('tokenError', ({ reason }) => {
+        if (isReadOnly) return;
         status('Session expired - changes can no longer be saved', true);
         toast(`Session could not be renewed: ${reason}. Copy your work or reopen the file.`, 'error');
       });
@@ -275,19 +429,7 @@
       setFile(fileId, fileName);
     }
 
-    const editorUrl = new URL('editor/index.html', window.location.href);
-    editorUrl.searchParams.set('embed', '1');
-    editorUrl.searchParams.set('ui', 'atlas');
-    editorUrl.searchParams.set('spin', '1');
-    editorUrl.searchParams.set('proto', 'json');
-    editorUrl.searchParams.set('configure', '1');
-    editorUrl.searchParams.set('saveAndExit', '0');
-    editorUrl.searchParams.set('noSaveBtn', '0');
-    editorUrl.searchParams.set('noExitBtn', '0');
-    editorUrl.searchParams.set('offline', '1');
-    editorUrl.searchParams.set('local', '1');
-    editorUrl.searchParams.set('dark', isDark ? '1' : '0');
-    iframe.src = editorUrl.toString();
+    iframe.src = buildEditorUrl(isReadOnly);
   </script>
 </body>
 </html>
